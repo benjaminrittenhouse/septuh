@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Septuh — SEPTA Delay Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e2e8f0;
+      --muted: #6b7280;
+      --septa-blue: #0057a8;
+      --septa-red: #e8192c;
+      --late: #f87171;
+      --ok: #34d399;
+      --warn: #fbbf24;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    header .logo {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    header .logo span { color: var(--septa-red); }
+
+    header .subtitle {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    header .status-pill {
+      margin-left: auto;
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      background: #1e2a1e;
+      color: var(--ok);
+      border: 1px solid #2d4a2d;
+    }
+
+    .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+    /* stat cards */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+
+    .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .card .sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .card .value.red  { color: var(--late); }
+    .card .value.green{ color: var(--ok); }
+    .card .value.warn { color: var(--warn); }
+
+    /* section */
+    .section { margin-bottom: 32px; }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title .days-select {
+      margin-left: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .chart-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      position: relative;
+      min-height: 260px;
+    }
+
+    /* two-col layout for bottom charts */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    @media (max-width: 780px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid #1e2130;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1e2130; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-red   { background: #3b0d0d; color: var(--late); }
+    .badge-green { background: #0d2b1f; color: var(--ok);   }
+    .badge-warn  { background: #2b2108; color: var(--warn); }
+
+    .no-data {
+      text-align: center;
+      color: var(--muted);
+      padding: 40px 0;
+      font-style: italic;
+    }
+
+    .refresh-btn {
+      margin-left: auto;
+      background: var(--septa-blue);
+      border: none;
+      color: #fff;
+      border-radius: 6px;
+      padding: 5px 14px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .refresh-btn:hover { background: #0068cc; }
+
+    .loading { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">sep<span>tuh</span></div>
+    <div class="subtitle">SEPTA Regional Rail Delay Tracker</div>
+  </div>
+  <div id="status-pill" class="status-pill">loading…</div>
+  <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+</header>
+
+<div class="main">
+
+  <!-- Today stat cards -->
+  <div class="section">
+    <div class="section-title">Today at a Glance</div>
+    <div class="cards">
+      <div class="card">
+        <div class="label">Trains Observed</div>
+        <div class="value" id="card-total">—</div>
+        <div class="sub">unique snapshots today</div>
+      </div>
+      <div class="card">
+        <div class="label">Late Observations</div>
+        <div class="value red" id="card-late">—</div>
+        <div class="sub">trains caught running late</div>
+      </div>
+      <div class="card">
+        <div class="label">On-Time Rate</div>
+        <div class="value green" id="card-ontime">—</div>
+        <div class="sub">of all observations</div>
+      </div>
+      <div class="card">
+        <div class="label">Avg Delay</div>
+        <div class="value warn" id="card-avg">—</div>
+        <div class="sub">minutes (late trains only)</div>
+      </div>
+      <div class="card">
+        <div class="label">Cancelled</div>
+        <div class="value red" id="card-cancelled">—</div>
+        <div class="sub">trains out of service</div>
+      </div>
+      <div class="card">
+        <div class="label">Worst Delay</div>
+        <div class="value red" id="card-worst">—</div>
+        <div class="sub">minutes behind schedule</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Today timeline chart -->
+  <div class="section">
+    <div class="section-title">Today — Late Trains by Snapshot</div>
+    <div class="chart-wrap">
+      <canvas id="chart-today"></canvas>
+      <div id="today-nodata" class="no-data" style="display:none">No data collected yet today. Start the collector!</div>
+    </div>
+  </div>
+
+  <!-- History + lines -->
+  <div class="section">
+    <div class="section-title">
+      Historical — Daily Late %
+      <select class="days-select" id="history-days" onchange="loadHistory()">
+        <option value="7">Past 7 days</option>
+        <option value="30" selected>Past 30 days</option>
+        <option value="90">Past 90 days</option>
+        <option value="180">Past 180 days</option>
+      </select>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chart-history"></canvas>
+      <div id="history-nodata" class="no-data" style="display:none">No historical data yet. Let the collector run for a few days!</div>
+    </div>
+  </div>
+
+  <!-- Two-col: by line + worst offenders -->
+  <div class="two-col section">
+    <div>
+      <div class="section-title">Today — by Rail Line</div>
+      <div class="chart-wrap" style="padding: 0; overflow: hidden;">
+        <div id="lines-table-wrap">
+          <div class="no-data loading" style="padding:40px 0">Loading…</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="section-title">
+        Worst Offenders
+        <select class="days-select" id="worst-days" onchange="loadWorst()">
+          <option value="7" selected>Past 7 days</option>
+          <option value="14">Past 14 days</option>
+          <option value="30">Past 30 days</option>
+        </select>
+      </div>
+      <div class="chart-wrap" style="padding: 0; overflow: hidden;">
+        <div id="worst-table-wrap">
+          <div class="no-data loading" style="padding:40px 0">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ── Chart defaults ──────────────────────────────────────────────────────────
+Chart.defaults.color = '#6b7280';
+Chart.defaults.borderColor = '#2a2d3a';
+Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+Chart.defaults.font.size = 12;
+
+let chartToday = null;
+let chartHistory = null;
+
+// ── Fetch helpers ───────────────────────────────────────────────────────────
+async function api(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// ── Status pill ─────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    const pill = document.getElementById('status-pill');
+    if (s.total_rows === 0) {
+      pill.textContent = 'no data yet';
+      pill.style.color = '#fbbf24';
+    } else {
+      pill.textContent = `${s.total_rows.toLocaleString()} rows · ${s.days_with_data} days`;
+      pill.style.color = '#34d399';
+    }
+  } catch(e) {
+    document.getElementById('status-pill').textContent = 'DB error';
+  }
+}
+
+// ── Today timeline ──────────────────────────────────────────────────────────
+async function loadToday() {
+  const data = await api('/api/today');
+  const nodata = document.getElementById('today-nodata');
+  const canvas = document.getElementById('chart-today');
+
+  if (!data.length) {
+    nodata.style.display = 'block';
+    canvas.style.display = 'none';
+
+    // Clear stat cards
+    ['card-total','card-late','card-ontime','card-avg','card-worst'].forEach(id => {
+      document.getElementById(id).textContent = '—';
+    });
+    return;
+  }
+
+  nodata.style.display = 'none';
+  canvas.style.display = 'block';
+
+  // Aggregate for cards
+  const total     = data.reduce((s, r) => s + r.total, 0);
+  const late      = data.reduce((s, r) => s + r.late_count, 0);
+  const cancelled = data.reduce((s, r) => s + (r.cancelled_count || 0), 0);
+  const ontime    = total ? ((total - late - cancelled) / total * 100).toFixed(1) : '—';
+  const avgArr    = data.filter(r => r.avg_late_min).map(r => r.avg_late_min);
+  const avg       = avgArr.length ? (avgArr.reduce((a,b) => a+b,0) / avgArr.length).toFixed(1) : '—';
+  const worst     = Math.max(...data.map(r => r.max_late_min || 0));
+
+  document.getElementById('card-total').textContent     = total.toLocaleString();
+  document.getElementById('card-late').textContent      = late.toLocaleString();
+  document.getElementById('card-cancelled').textContent = cancelled.toLocaleString();
+  document.getElementById('card-ontime').textContent    = ontime !== '—' ? ontime + '%' : '—';
+  document.getElementById('card-avg').textContent       = avg !== '—' ? avg + ' min' : '—';
+  document.getElementById('card-worst').textContent     = worst > 0 ? worst + ' min' : '—';
+
+  const labels         = data.map(r => r.hour_min);
+  const lateCounts     = data.map(r => r.late_count);
+  const cancelCounts   = data.map(r => r.cancelled_count || 0);
+  const totalCounts    = data.map(r => r.total);
+
+  if (chartToday) chartToday.destroy();
+  chartToday = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Late trains',
+          data: lateCounts,
+          backgroundColor: '#f8717166',
+          borderColor: '#f87171',
+          borderWidth: 1,
+          order: 1,
+        },
+        {
+          label: 'Cancelled',
+          data: cancelCounts,
+          backgroundColor: '#a855f766',
+          borderColor: '#a855f7',
+          borderWidth: 1,
+          order: 1,
+        },
+        {
+          label: 'Total observed',
+          data: totalCounts,
+          type: 'line',
+          borderColor: '#60a5fa',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 2,
+          tension: 0.3,
+          order: 0,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+      scales: {
+        x: { grid: { color: '#1e2130' } },
+        y: { grid: { color: '#1e2130' }, beginAtZero: true, title: { display: true, text: 'Trains' } },
+      }
+    }
+  });
+}
+
+// ── History ─────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const days = document.getElementById('history-days').value;
+  const data = await api(`/api/history?days=${days}`);
+  const nodata = document.getElementById('history-nodata');
+  const canvas = document.getElementById('chart-history');
+
+  if (!data.length) {
+    nodata.style.display = 'block';
+    canvas.style.display = 'none';
+    return;
+  }
+  nodata.style.display = 'none';
+  canvas.style.display = 'block';
+
+  const labels   = data.map(r => r.day);
+  const latePcts = data.map(r => r.late_pct);
+  const avgDelays = data.map(r => r.avg_late_min);
+
+  if (chartHistory) chartHistory.destroy();
+  chartHistory = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Late %',
+          data: latePcts,
+          borderColor: '#f87171',
+          backgroundColor: '#f8717120',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Avg delay (min, late trains)',
+          data: avgDelays,
+          borderColor: '#fbbf24',
+          backgroundColor: 'transparent',
+          borderDash: [4, 3],
+          tension: 0.3,
+          pointRadius: 2,
+          yAxisID: 'y2',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        x:  { grid: { color: '#1e2130' } },
+        y:  { grid: { color: '#1e2130' }, beginAtZero: true, title: { display: true, text: '% Late' },
+              ticks: { callback: v => v + '%' } },
+        y2: { position: 'right', grid: { drawOnChartArea: false }, beginAtZero: true,
+              title: { display: true, text: 'Avg delay (min)' } },
+      }
+    }
+  });
+}
+
+// ── Today by line table ──────────────────────────────────────────────────────
+async function loadLineTable() {
+  const data = await api('/api/today/lines');
+  const wrap = document.getElementById('lines-table-wrap');
+
+  if (!data.length) {
+    wrap.innerHTML = '<div class="no-data">No line data yet today.</div>';
+    return;
+  }
+
+  const rows = data.map(r => {
+    const pct = r.late_pct ?? 0;
+    const badge = pct > 30 ? 'badge-red' : pct > 10 ? 'badge-warn' : 'badge-green';
+    const cancelled = r.cancelled_count || 0;
+    return `<tr>
+      <td>${r.line}</td>
+      <td>${r.total}</td>
+      <td><span class="badge ${badge}">${pct}%</span></td>
+      <td style="color:#a855f7">${cancelled > 0 ? cancelled : '—'}</td>
+      <td>${r.avg_late_min ?? '—'} min</td>
+      <td>${r.max_late_min ?? '—'} min</td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Line</th><th>Observed</th><th>Late %</th><th>Cancelled</th><th>Avg Delay</th><th>Worst</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ── Worst offenders table ────────────────────────────────────────────────────
+async function loadWorst() {
+  const days = document.getElementById('worst-days').value;
+  const data = await api(`/api/worst?days=${days}`);
+  const wrap = document.getElementById('worst-table-wrap');
+
+  if (!data.length) {
+    wrap.innerHTML = '<div class="no-data">No data yet.</div>';
+    return;
+  }
+
+  const rows = data.map(r => {
+    const badge = r.late_pct > 50 ? 'badge-red' : r.late_pct > 25 ? 'badge-warn' : 'badge-green';
+    return `<tr>
+      <td>#${r.train_no}</td>
+      <td style="color:#94a3b8">${r.line}</td>
+      <td><span class="badge ${badge}">${r.late_pct}%</span></td>
+      <td>${r.worst_delay_min} min</td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Train</th><th>Line</th><th>Late %</th><th>Worst Delay</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ── Load everything ──────────────────────────────────────────────────────────
+async function loadAll() {
+  try { await loadStatus(); } catch(e) { console.error(e); }
+  try { await loadToday(); } catch(e) { console.error(e); }
+  try { await loadHistory(); } catch(e) { console.error(e); }
+  try { await loadLineTable(); } catch(e) { console.error(e); }
+  try { await loadWorst(); } catch(e) { console.error(e); }
+}
+
+loadAll();
+
+// Auto-refresh every 5 minutes
+setInterval(loadAll, 5 * 60 * 1000);
+</script>
+
+</body>
+</html>
